@@ -12,6 +12,7 @@ src/test/resources/org/opensearch/prometheus-exporter/bwc/
 *.iws
 build-idea/
 out/
+bin/
 
 # include shared intellij config
 !.idea/inspectionProfiles/Project_Default.xml

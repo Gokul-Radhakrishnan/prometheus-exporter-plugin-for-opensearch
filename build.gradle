@@ -67,6 +67,7 @@ apply plugin: 'java'
 apply plugin: 'idea'
 apply plugin: 'opensearch.opensearchplugin'
 apply plugin: 'opensearch.yaml-rest-test'
+apply plugin: 'opensearch.java-agent'
 //apply plugin: 'checkstyle'
 
 def pluginName = pluginName
@@ -109,6 +110,9 @@ dependencies {
 //    compile "io.prometheus:simpleclient_common:${versions.prometheus}"
     implementation group: 'io.prometheus', name: 'simpleclient', version: '0.16.0'
     implementation group: 'io.prometheus', name: 'simpleclient_common', version: '0.16.0'
+//    implementation("org.opensearch:opensearch-secure-sm:3.0.0")
+//    // https://mvnrepository.com/artifact/org.opensearch/opensearch-common
+//    implementation("org.opensearch:opensearch-common:3.0.0")
 }
 
 restResources {
@@ -180,161 +184,161 @@ project.opensearch_version = ext.versions.opensearch
 
 // Clusters for BWC tests
 2.times { i ->
-    testClusters {
-        "${baseName}$i" {
-            versions = [project.BWCversion, project.opensearch_version]
-            numberOfNodes = 3
-            plugin(provider(new Callable<RegularFile>() {
-                @Override
-                RegularFile call() throws Exception {
-                    return new RegularFile() {
-                        @Override
-                        File getAsFile() {
-                            if (new File("$project.rootDir/$bwcFilePath/prometheus-exporter/$project.BWCPluginVersion").exists()) {
-                                project.delete(files("$project.rootDir/$bwcFilePath/prometheus-exporter/$project.BWCPluginVersion"))
-                            }
-                            project.mkdir bwcPrometheusExporterPath + project.BWCPluginVersion
-                            ant.get(src: bwcPluginDownloadLink,
-                                    dest: bwcPrometheusExporterPath + project.BWCPluginVersion,
-                                    httpusecaches: false)
-                            return fileTree(bwcPrometheusExporterPath + project.BWCPluginVersion).getSingleFile()
-                        }
-                    }
-                }
-            }))
-            setting 'path.repo', "${buildDir}/cluster/shared/repo/${baseName}"
-            setting 'http.content_type.required', 'true'
-        }
-    }
+   testClusters {
+       "${baseName}$i" {
+           versions = [project.BWCversion, project.opensearch_version]
+           numberOfNodes = 3
+           plugin(provider(new Callable<RegularFile>() {
+               @Override
+               RegularFile call() throws Exception {
+                   return new RegularFile() {
+                       @Override
+                       File getAsFile() {
+                           if (new File("$project.rootDir/$bwcFilePath/prometheus-exporter/$project.BWCPluginVersion").exists()) {
+                               project.delete(files("$project.rootDir/$bwcFilePath/prometheus-exporter/$project.BWCPluginVersion"))
+                           }
+                           project.mkdir bwcPrometheusExporterPath + project.BWCPluginVersion
+                           ant.get(src: bwcPluginDownloadLink,
+                                   dest: bwcPrometheusExporterPath + project.BWCPluginVersion,
+                                   httpusecaches: false)
+                           return fileTree(bwcPrometheusExporterPath + project.BWCPluginVersion).getSingleFile()
+                       }
+                   }
+               }
+           }))
+           setting 'path.repo', "${buildDir}/cluster/shared/repo/${baseName}"
+           setting 'http.content_type.required', 'true'
+       }
+   }
 }
 
 List<Provider<RegularFile>> plugins = [
-    provider(new Callable<RegularFile>(){
-        @Override
-        RegularFile call() throws Exception {
-            return new RegularFile() {
-                @Override
-                File getAsFile() {
-                    return fileTree(bwcPrometheusExporterPath + project.version).getSingleFile()
-                }
-            }
-        }
-    })
+   provider(new Callable<RegularFile>(){
+       @Override
+       RegularFile call() throws Exception {
+           return new RegularFile() {
+               @Override
+               File getAsFile() {
+                   return fileTree(bwcPrometheusExporterPath + project.version).getSingleFile()
+               }
+           }
+       }
+   })
 ]
 
 // Creates 2 test clusters with 3 nodes of the old version.
 2.times {i ->
-    task "${baseName}#oldVersionClusterTask$i"(type: RestIntegTestTask) {
-        useCluster testClusters."${baseName}$i"
-        filter {
-            includeTestsMatching "org.opensearch.plugin.bwc.*IT"
-        }
-        systemProperty 'tests.rest.bwcsuite', 'old_cluster'
-        systemProperty 'tests.rest.bwcsuite_round', 'old'
-        systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
-        nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}$i".allHttpSocketURI.join(",")}")
-        nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}$i".getName()}")
-    }
+   task "${baseName}#oldVersionClusterTask$i"(type: RestIntegTestTask) {
+       useCluster testClusters."${baseName}$i"
+       filter {
+           includeTestsMatching "org.opensearch.plugin.bwc.*IT"
+       }
+       systemProperty 'tests.rest.bwcsuite', 'old_cluster'
+       systemProperty 'tests.rest.bwcsuite_round', 'old'
+       systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
+       nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}$i".allHttpSocketURI.join(",")}")
+       nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}$i".getName()}")
+   }
 }
 
 // Upgrades one node of the old cluster to new OpenSearch version with upgraded plugin version
 // This results in a mixed cluster with 2 nodes on the old version and 1 upgraded node.
 // This is also used as a one third upgraded cluster for a rolling upgrade.
 task "${baseName}#mixedClusterTask"(type: RestIntegTestTask) {
-    dependsOn tasks.named("copyZIPBundle")
-    useCluster testClusters."${baseName}0"
-    dependsOn "${baseName}#oldVersionClusterTask0"
-    doFirst {
-        testClusters."${baseName}0".upgradeNodeAndPluginToNextVersion(plugins)
-    }
-    filter {
-        includeTestsMatching "org.opensearch.plugin.bwc.*IT"
-    }
-    systemProperty 'tests.rest.bwcsuite', 'mixed_cluster'
-    systemProperty 'tests.rest.bwcsuite_round', 'first'
-    systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
-    nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}0".allHttpSocketURI.join(",")}")
-    nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}0".getName()}")
+   dependsOn tasks.named("copyZIPBundle")
+   useCluster testClusters."${baseName}0"
+   dependsOn "${baseName}#oldVersionClusterTask0"
+   doFirst {
+       testClusters."${baseName}0".upgradeNodeAndPluginToNextVersion(plugins)
+   }
+   filter {
+       includeTestsMatching "org.opensearch.plugin.bwc.*IT"
+   }
+   systemProperty 'tests.rest.bwcsuite', 'mixed_cluster'
+   systemProperty 'tests.rest.bwcsuite_round', 'first'
+   systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
+   nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}0".allHttpSocketURI.join(",")}")
+   nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}0".getName()}")
 }
 
 // Upgrades the second node to new OpenSearch version with upgraded plugin version after the first node is upgraded.
 // This results in a mixed cluster with 1 node on the old version and 2 upgraded nodes.
 // This is used for rolling upgrade.
 task "${baseName}#twoThirdsUpgradedClusterTask"(type: RestIntegTestTask) {
-    dependsOn tasks.named("copyZIPBundle")
-    dependsOn "${baseName}#mixedClusterTask"
-    useCluster testClusters."${baseName}0"
-    doFirst {
-        testClusters."${baseName}0".upgradeNodeAndPluginToNextVersion(plugins)
-    }
-    filter {
-        includeTestsMatching "org.opensearch.plugin.bwc.*IT"
-    }
-    systemProperty 'tests.rest.bwcsuite', 'mixed_cluster'
-    systemProperty 'tests.rest.bwcsuite_round', 'second'
-    systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
-    nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}0".allHttpSocketURI.join(",")}")
-    nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}0".getName()}")
+   dependsOn tasks.named("copyZIPBundle")
+   dependsOn "${baseName}#mixedClusterTask"
+   useCluster testClusters."${baseName}0"
+   doFirst {
+       testClusters."${baseName}0".upgradeNodeAndPluginToNextVersion(plugins)
+   }
+   filter {
+       includeTestsMatching "org.opensearch.plugin.bwc.*IT"
+   }
+   systemProperty 'tests.rest.bwcsuite', 'mixed_cluster'
+   systemProperty 'tests.rest.bwcsuite_round', 'second'
+   systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
+   nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}0".allHttpSocketURI.join(",")}")
+   nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}0".getName()}")
 }
 
 // Upgrades the third node to new OpenSearch version with upgraded plugin version after the second node is upgraded.
 // This results in a fully upgraded cluster.
 // This is used for rolling upgrade.
 task "${baseName}#rollingUpgradeClusterTask"(type: RestIntegTestTask) {
-    dependsOn tasks.named("copyZIPBundle")
-    dependsOn "${baseName}#twoThirdsUpgradedClusterTask"
-    useCluster testClusters."${baseName}0"
-    doFirst {
-        testClusters."${baseName}0".upgradeNodeAndPluginToNextVersion(plugins)
-    }
-    filter {
-        includeTestsMatching "org.opensearch.plugin.bwc.*IT"
-    }
-    mustRunAfter "${baseName}#mixedClusterTask"
-    systemProperty 'tests.rest.bwcsuite', 'mixed_cluster'
-    systemProperty 'tests.rest.bwcsuite_round', 'third'
-    systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
-    nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}0".allHttpSocketURI.join(",")}")
-    nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}0".getName()}")
+   dependsOn tasks.named("copyZIPBundle")
+   dependsOn "${baseName}#twoThirdsUpgradedClusterTask"
+   useCluster testClusters."${baseName}0"
+   doFirst {
+       testClusters."${baseName}0".upgradeNodeAndPluginToNextVersion(plugins)
+   }
+   filter {
+       includeTestsMatching "org.opensearch.plugin.bwc.*IT"
+   }
+   mustRunAfter "${baseName}#mixedClusterTask"
+   systemProperty 'tests.rest.bwcsuite', 'mixed_cluster'
+   systemProperty 'tests.rest.bwcsuite_round', 'third'
+   systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
+   nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}0".allHttpSocketURI.join(",")}")
+   nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}0".getName()}")
 }
 
 // Upgrades all the nodes of the old cluster to new OpenSearch version with upgraded plugin version
 // at the same time resulting in a fully upgraded cluster.
 task "${baseName}#fullRestartClusterTask"(type: RestIntegTestTask) {
-    dependsOn tasks.named("copyZIPBundle")
-    dependsOn "${baseName}#oldVersionClusterTask1"
-    useCluster testClusters."${baseName}1"
-    doFirst {
-        testClusters."${baseName}1".upgradeAllNodesAndPluginsToNextVersion(plugins)
-    }
-    filter {
-        includeTestsMatching "org.opensearch.plugin.bwc.*IT"
-    }
-    systemProperty 'tests.rest.bwcsuite', 'upgraded_cluster'
-    systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
-    nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}1".allHttpSocketURI.join(",")}")
-    nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}1".getName()}")
+   dependsOn tasks.named("copyZIPBundle")
+   dependsOn "${baseName}#oldVersionClusterTask1"
+   useCluster testClusters."${baseName}1"
+   doFirst {
+       testClusters."${baseName}1".upgradeAllNodesAndPluginsToNextVersion(plugins)
+   }
+   filter {
+       includeTestsMatching "org.opensearch.plugin.bwc.*IT"
+   }
+   systemProperty 'tests.rest.bwcsuite', 'upgraded_cluster'
+   systemProperty 'tests.plugin_bwc_version', project.BWCPluginVersion
+   nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters."${baseName}1".allHttpSocketURI.join(",")}")
+   nonInputProperties.systemProperty('tests.clustername', "${-> testClusters."${baseName}1".getName()}")
 }
 
 // A BWC test suite which runs all the bwc tasks combined.
 task bwcTestSuite(type: RestIntegTestTask) {
 
-    // Delete all downloaded and built plugin ZIP files.
-    // Again – we are using ant task to workaround gradle resources modification alert.
-    doFirst {
-        ant.delete(includeEmptyDirs: true, verbose: true, removeNotFollowedSymlinks: true) {
-            ant.fileset(
-                    dir: 'src/test/resources/org/opensearch/prometheus-exporter/bwc/prometheus-exporter'
-            )
-        }
-    }
+   // Delete all downloaded and built plugin ZIP files.
+   // Again – we are using ant task to workaround gradle resources modification alert.
+   doFirst {
+       ant.delete(includeEmptyDirs: true, verbose: true, removeNotFollowedSymlinks: true) {
+           ant.fileset(
+                   dir: 'src/test/resources/org/opensearch/prometheus-exporter/bwc/prometheus-exporter'
+           )
+       }
+   }
 
-    exclude '**/*Test*'
-    exclude '**/*IT*'
+   exclude '**/*Test*'
+   exclude '**/*IT*'
 
-    dependsOn tasks.named("${baseName}#mixedClusterTask")
-    dependsOn tasks.named("${baseName}#rollingUpgradeClusterTask")
-    dependsOn tasks.named("${baseName}#fullRestartClusterTask")
+   dependsOn tasks.named("${baseName}#mixedClusterTask")
+   dependsOn tasks.named("${baseName}#rollingUpgradeClusterTask")
+   dependsOn tasks.named("${baseName}#fullRestartClusterTask")
 }
 
 run {
